@@ -40,7 +40,8 @@ import {
   queryValidator,
   resolveMemberTeamsMiddleware,
 } from "../../middleware/index.js"
-import { getModelsDevProvider, listModelsDevProviders } from "../../llm/models-dev.js"
+import { discoverCustomProviderModels } from "../../llm/custom-provider-discovery.js"
+import { getModelsDevProvider, listModelsDevProviders, type ModelsDevModel, type ModelsDevProvider } from "../../llm/models-dev.js"
 import type { MemberTeamsContext } from "../../middleware/member-teams.js"
 import { denTypeIdSchema, emptyResponse, forbiddenSchema, invalidRequestSchema, jsonResponse, notFoundSchema, unauthorizedSchema } from "../../openapi.js"
 import { organizationAllowsManagedModels, repairMemberInferenceAccessIfNeeded } from "../../inference.js"
@@ -100,22 +101,12 @@ const llmProviderWriteSchema = z.object({
   // single org-wide access row instead of materialized member ids.
   allMembers: z.boolean().optional().default(false),
 }).superRefine((value, ctx) => {
-  if (value.source === "models_dev") {
-    if (!value.providerId) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["providerId"],
-        message: "Select a provider.",
-      })
-    }
-
-    if (!value.modelIds?.length) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["modelIds"],
-        message: "Select at least one model.",
-      })
-    }
+  if (value.source === "models_dev" && !value.providerId) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["providerId"],
+      message: "Select a provider.",
+    })
   }
 
   if (value.source === "custom" && !value.customConfigText && value.customConfig === undefined) {
@@ -535,6 +526,31 @@ async function getLlmProvider(input: {
   return rows[0] ?? null
 }
 
+/**
+ * Every model a catalog provider offers: its models.dev entries, plus any model
+ * the provider's own `/models` already lists that the catalog has not caught up
+ * with. Used when the write omits `modelIds`, which means "all models". A
+ * provider-list failure never blocks the save: the catalog is the fallback, so
+ * an unreachable provider still stores its key.
+ */
+async function allCatalogProviderModels(provider: ModelsDevProvider, apiKey: string | undefined) {
+  const models: ModelsDevModel[] = [...provider.models]
+  const known = new Set(models.map((model) => model.id))
+  const baseUrl = provider.api?.trim()
+  const key = apiKey?.trim()
+  if (!baseUrl || !key) return models
+  const discovered = await discoverCustomProviderModels(
+    { baseUrl, apiKey: key },
+    { loadMatchCatalog: async () => provider.models },
+  ).catch(() => null)
+  for (const found of discovered?.models ?? []) {
+    if (known.has(found.id) || !found.model) continue
+    known.add(found.id)
+    models.push({ id: found.id, name: found.model.name ?? found.id, config: { ...found.model } })
+  }
+  return models
+}
+
 async function normalizeLlmProviderInput(
   input: z.infer<typeof llmProviderWriteSchema>,
   existingProvider: Pick<LlmProviderRow, "apiKey" | "providerConfig"> | null = null,
@@ -554,16 +570,19 @@ async function normalizeLlmProviderInput(
     // can name anything — accept ids outside the models.dev catalog for
     // Azure providers instead of rejecting the save.
     const allowDeploymentIds = provider.npm === "@ai-sdk/azure"
-    const models = requestedModelIds.map((modelId) => {
-      const model = modelsById.get(modelId)
-      if (!model) {
-        if (allowDeploymentIds) {
-          return { id: modelId, name: modelId, config: { id: modelId, name: modelId } }
+    // No modelIds means every model the provider offers.
+    const models = requestedModelIds.length === 0
+      ? await allCatalogProviderModels(provider, input.apiKey)
+      : requestedModelIds.map((modelId) => {
+        const model = modelsById.get(modelId)
+        if (!model) {
+          if (allowDeploymentIds) {
+            return { id: modelId, name: modelId, config: { id: modelId, name: modelId } }
+          }
+          throw createFailure(404, "model_not_found", `Model ${modelId} is not available for ${provider.name}.`)
         }
-        throw createFailure(404, "model_not_found", `Model ${modelId} is not available for ${provider.name}.`)
-      }
-      return model
-    })
+        return model
+      })
 
     return {
       source: input.source,

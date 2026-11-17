@@ -583,10 +583,7 @@ export function LlmProviderEditorScreen({
                 setSaveError("Select a provider.");
                 return;
             }
-            if (!selectedModelIds.length) {
-                setSaveError("Select at least one model.");
-                return;
-            }
+            // An empty selection means every model the provider offers.
         }
 
         if (source === "custom" && customMode === "form") {
@@ -673,7 +670,8 @@ export function LlmProviderEditorScreen({
 
             if (source === "models_dev") {
                 body.providerId = selectedProviderId;
-                body.modelIds = selectedModelIds;
+                // Omitted means "every model this provider offers".
+                if (selectedModelIds.length) body.modelIds = selectedModelIds;
             } else if (customMode === "form") {
                 body.customConfig = buildGuidedCustomProviderConfig({
                     providerId: resolvedCustomProviderId,
@@ -1325,16 +1323,16 @@ export function LlmProviderEditorScreen({
                                 </h2>
                                 {catalogDetail ? (
                                     <span className="rounded-full bg-gray-200 px-3 py-1 text-[12px] font-medium text-gray-700">
-                                        {selectedModelIds.length}{" "}
-                                        {selectedModelIds.length === 1
-                                            ? "model selected"
-                                            : "models selected"}
+                                        {selectedModelIds.length === 0
+                                            ? "All models"
+                                            : `${selectedModelIds.length} ${selectedModelIds.length === 1 ? "model selected" : "models selected"}`}
                                     </span>
                                 ) : null}
                             </div>
                             <p className="mt-2 text-[15px] text-gray-500">
-                                Pick the exact models this provider should
-                                allow.
+                                Pick specific models, or leave this empty to
+                                offer every model the provider lists — including
+                                new ones it adds later.
                             </p>
                             {isAzureCatalog ? (
                                 azureProbeState === "ok" && azureProbeResult ? (
