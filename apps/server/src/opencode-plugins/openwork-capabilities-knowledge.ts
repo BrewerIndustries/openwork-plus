@@ -59,7 +59,7 @@ Here is what you can help users with:
 - After signing in, cloud-provisioned providers and extensions appear automatically.
 
 ## Skills
-- Specialized instruction packs for specific workflows, manageable via Settings > Library. Create them as the \`Skill creation:\` instruction in this prompt directs.
+- Specialized instruction packs for specific workflows, manageable via Settings > Library. Create them as the "Capturing repeatable work" section of your operating instructions directs.
 
 ## Automations
 ${automationRuntimeKnowledge()}
