@@ -544,9 +544,16 @@ async function allCatalogProviderModels(provider: ModelsDevProvider, apiKey: str
     { loadMatchCatalog: async () => provider.models },
   ).catch(() => null)
   for (const found of discovered?.models ?? []) {
-    if (known.has(found.id) || !found.model) continue
+    if (known.has(found.id)) continue
     known.add(found.id)
-    models.push({ id: found.id, name: found.model.name ?? found.id, config: { ...found.model } })
+    // A model the catalog does not know and the provider described only
+    // briefly still belongs in "all models": keep it with what we have.
+    const name = found.model?.name ?? found.id
+    models.push({
+      id: found.id,
+      name,
+      config: found.model ? { ...found.model } : { id: found.id, name },
+    })
   }
   return models
 }
