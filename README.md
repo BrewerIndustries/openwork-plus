@@ -1,5 +1,19 @@
 # OpenWork
 
+> **This is the Brewer Industries fork of OpenWork.** It tracks upstream
+> [`different-ai/openwork`](https://github.com/different-ai/openwork) and carries the changes below
+> on `dev`. Everything after this section is upstream's README.
+
+## What this fork adds
+
+| Area | Change |
+| --- | --- |
+| **Agent instructions** | Revised operating instructions (2026-11-17 revision): instruction priority (user message → organization → OpenWork → skills → tool content), untrusted tool content, confirmation tiers, work on copies, deciding when to ask, unattended runs, failure handling, verifying work, current information, large data, capturing repeatable work, communication shape and git rules. `apps/server/src/openwork-agent-prompt.ts`, `apps/server/src/opencode-v2-instructions.ts` |
+| **Cloud guidance** | `guidance.md` rebuilt as a sectioned document with `{curly}` placeholders (capabilities, connections, skills, artifacts, Workflows, remote sessions, plugin imports, marketplace sharing). The Connect MCP instructions were trimmed to the guidance pointer plus the Slack and `putMeAgent` rules, freeing the 4 KB budget for the service directory and skill index. `ee/apps/den-api/src/mcp/agent-server.ts` |
+| **Prompt documentation** | Revision record, changelog keyed to review items, and the regression set to run after prompt changes: `docs/prompts/` |
+| **Bring your Own Keys: all models** | A catalog provider saved without selecting models now means every model the provider offers — the models.dev catalog plus any model the provider's own `/models` lists that the catalog has not caught up with. Previously at least one model was required, so new provider releases stayed invisible. `ee/apps/den-api/src/routes/org/llm-providers.ts` |
+| **Model refresh** | A **Refresh models** action on the provider screen (`POST /v1/llm-providers/:id/refresh-models`) re-reads the provider list on demand, and Den refreshes OpenRouter providers shortly after boot and then every 24 hours. `DEN_LLM_PROVIDER_REFRESH_HOURS` sets the interval; `0` disables it. `ee/apps/den-api/src/llm/provider-model-refresh.ts`, `ee/apps/den-api/src/llm/provider-model-refresh-loop.ts` |
+
 <p align="center">
   <img src="./docs/images/model-picker.png" width="560" alt="The OpenWork composer with its model picker open: pinned, recent and per-provider models from Anthropic, OpenAI, Google and a local Ollama model" />
 </p>
