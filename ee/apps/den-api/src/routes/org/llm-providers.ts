@@ -1202,6 +1202,55 @@ export function registerOrgLlmProviderRoutes<T extends { Variables: OrgRouteVari
     },
   )
 
+  app.post(
+    "/v1/llm-providers/:llmProviderId/refresh-models",
+    describeRoute({
+      tags: ["LLM Providers"],
+      summary: "Refresh an LLM provider's models",
+      description: "Re-reads the provider's model list — the models.dev catalog plus any model the provider's own /models lists — and replaces the stored list. Requires the Edit any provider permission or ownership. Only catalog providers (source models_dev) can be refreshed; a custom provider's config owns its models.",
+      responses: {
+        200: jsonResponse("The provider's refreshed model count.", z.object({ llmProviderId: z.string(), modelCount: z.number().int() })),
+        404: jsonResponse("Resource not found.", notFoundSchema),
+        409: jsonResponse("This provider cannot be refreshed.", invalidRequestSchema),
+      },
+    }),
+    orgPermissionRoute("llm_providers.update"),
+    paramValidator(orgLlmProviderParamsSchema),
+    resolveMemberTeamsMiddleware,
+    async (c) => {
+      const payload = c.get("organizationContext")
+      const row = await getLlmProvider({
+        organizationId: payload.organization.id,
+        llmProviderId: parseLlmProviderId(c.req.valid("param").llmProviderId),
+      })
+      if (!row) return c.json({ error: "llm_provider_not_found" }, 404)
+      if (row.source !== "models_dev") return c.json({ error: "provider_refresh_unsupported" }, 409)
+      const provider = await getModelsDevProvider(row.providerId ?? "")
+      if (!provider) return c.json({ error: "provider_not_found" }, 404)
+      const credential = decodeProviderCredential(row.apiKey)
+      const models = await allCatalogProviderModels(
+        provider,
+        credential.apiKey ?? Object.values(credential.apiKeys ?? {})[0],
+      )
+      const now = new Date()
+      await db.transaction(async (tx) => {
+        await tx.delete(LlmProviderModelTable).where(eq(LlmProviderModelTable.llmProviderId, row.id))
+        if (models.length > 0) {
+          await tx.insert(LlmProviderModelTable).values(models.map((model) => ({
+            id: createDenTypeId("llmProviderModel"),
+            llmProviderId: row.id,
+            modelId: model.id,
+            name: model.name,
+            modelConfig: model.config,
+            createdAt: now,
+          })))
+        }
+        await tx.update(LlmProviderTable).set({ updatedAt: now }).where(eq(LlmProviderTable.id, row.id))
+      })
+      return c.json({ llmProviderId: row.id, modelCount: models.length })
+    },
+  )
+
   app.put(
     "/v1/llm-providers/by-key/:externalKey",
     describeRoute({

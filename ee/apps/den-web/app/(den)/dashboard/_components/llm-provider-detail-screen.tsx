@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowRightLeft, ExternalLink, KeyRound, Trash2, Users } from "lucide-react";
+import { ArrowLeft, ArrowRightLeft, ExternalLink, KeyRound, RefreshCw, Trash2, Users } from "lucide-react";
 import { DenButton } from "../../_components/ui/button";
 import { DenNotice } from "../../_components/ui/notice";
 import { getRequestError, requestJson } from "../../_lib/den-flow";
@@ -57,6 +57,9 @@ export function LlmProviderDetailScreen({
         useOrgLlmProviders(orgId);
     const [deleteBusy, setDeleteBusy] = useState(false);
     const [deleteError, setDeleteError] = useState<string | null>(null);
+    const [refreshBusy, setRefreshBusy] = useState(false);
+    const [refreshError, setRefreshError] = useState<string | null>(null);
+    const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
     const [confirmingMigrate, setConfirmingMigrate] = useState(false);
     const [migrateBusy, setMigrateBusy] = useState(false);
     const [migrateError, setMigrateError] = useState<string | null>(null);
@@ -110,6 +113,44 @@ export function LlmProviderDetailScreen({
             );
         } finally {
             setDeleteBusy(false);
+        }
+    }
+
+    async function refreshModels() {
+        if (!provider) {
+            return;
+        }
+
+        setRefreshError(null);
+        setRefreshNotice(null);
+        try {
+            await runReauthableAction("refresh-llm-provider-models", async () => {
+                setRefreshBusy(true);
+                const { response, payload } = await requestJson(
+                    `/v1/llm-providers/${encodeURIComponent(provider.id)}/refresh-models`,
+                    { method: "POST" },
+                    60000,
+                );
+
+                if (!response.ok) {
+                    throw getRequestError(payload, response, `Failed to refresh models (${response.status}).`);
+                }
+
+                const count = typeof payload === "object" && payload !== null && "modelCount" in payload && typeof payload.modelCount === "number"
+                    ? payload.modelCount
+                    : null;
+                setRefreshNotice(count === null ? "Models refreshed." : `Models refreshed: ${count} available.`);
+                await reloadProviders();
+                router.refresh();
+            });
+        } catch (nextError) {
+            setRefreshError(
+                nextError instanceof Error
+                    ? nextError.message
+                    : "Could not refresh models.",
+            );
+        } finally {
+            setRefreshBusy(false);
         }
     }
 
@@ -191,6 +232,19 @@ export function LlmProviderDetailScreen({
                 </Link>
 
                 <div className="flex flex-wrap gap-3">
+                    {provider.canManage && provider.source === "models_dev" ? (
+                        <DenButton
+                            variant="secondary"
+                            data-testid="llm-provider-refresh-models"
+                            disabled={refreshBusy}
+                            onClick={() => {
+                                void refreshModels();
+                            }}
+                        >
+                            <RefreshCw className="h-4 w-4" />
+                            {refreshBusy ? "Refreshing..." : "Refresh models"}
+                        </DenButton>
+                    ) : null}
                     {gatewayEnabled && provider.canManage && provider.source === "models_dev" && provider.credentialMode !== "per_member" ? (
                         <DenButton
                             variant="secondary"
@@ -233,6 +287,14 @@ export function LlmProviderDetailScreen({
                 <div className="mb-6 rounded-[28px] border border-red-200 bg-red-50 px-6 py-4 text-[14px] text-red-700">
                     {deleteError}
                 </div>
+            ) : null}
+            {refreshError ? (
+                <div className="mb-6 rounded-[28px] border border-red-200 bg-red-50 px-6 py-4 text-[14px] text-red-700">
+                    {refreshError}
+                </div>
+            ) : null}
+            {refreshNotice ? (
+                <DenNotice className="mb-6" tone="info" message={refreshNotice} />
             ) : null}
             {gatewayEnabled && migrateError ? (
                 <div className="mb-6 rounded-[28px] border border-red-200 bg-red-50 px-6 py-4 text-[14px] text-red-700">
