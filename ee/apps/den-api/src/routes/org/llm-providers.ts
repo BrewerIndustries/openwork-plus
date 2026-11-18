@@ -40,8 +40,8 @@ import {
   queryValidator,
   resolveMemberTeamsMiddleware,
 } from "../../middleware/index.js"
-import { discoverCustomProviderModels } from "../../llm/custom-provider-discovery.js"
-import { getModelsDevProvider, listModelsDevProviders, type ModelsDevModel, type ModelsDevProvider } from "../../llm/models-dev.js"
+import { getModelsDevProvider, listModelsDevProviders } from "../../llm/models-dev.js"
+import { allCatalogProviderModels, refreshCatalogProviderModels } from "../../llm/provider-model-refresh.js"
 import type { MemberTeamsContext } from "../../middleware/member-teams.js"
 import { denTypeIdSchema, emptyResponse, forbiddenSchema, invalidRequestSchema, jsonResponse, notFoundSchema, unauthorizedSchema } from "../../openapi.js"
 import { organizationAllowsManagedModels, repairMemberInferenceAccessIfNeeded } from "../../inference.js"
@@ -524,38 +524,6 @@ async function getLlmProvider(input: {
     ))
     .limit(1)
   return rows[0] ?? null
-}
-
-/**
- * Every model a catalog provider offers: its models.dev entries, plus any model
- * the provider's own `/models` already lists that the catalog has not caught up
- * with. Used when the write omits `modelIds`, which means "all models". A
- * provider-list failure never blocks the save: the catalog is the fallback, so
- * an unreachable provider still stores its key.
- */
-async function allCatalogProviderModels(provider: ModelsDevProvider, apiKey: string | undefined) {
-  const models: ModelsDevModel[] = [...provider.models]
-  const known = new Set(models.map((model) => model.id))
-  const baseUrl = provider.api?.trim()
-  const key = apiKey?.trim()
-  if (!baseUrl || !key) return models
-  const discovered = await discoverCustomProviderModels(
-    { baseUrl, apiKey: key },
-    { loadMatchCatalog: async () => provider.models },
-  ).catch(() => null)
-  for (const found of discovered?.models ?? []) {
-    if (known.has(found.id)) continue
-    known.add(found.id)
-    // A model the catalog does not know and the provider described only
-    // briefly still belongs in "all models": keep it with what we have.
-    const name = found.model?.name ?? found.id
-    models.push({
-      id: found.id,
-      name,
-      config: found.model ? { ...found.model } : { id: found.id, name },
-    })
-  }
-  return models
 }
 
 async function normalizeLlmProviderInput(
@@ -1227,27 +1195,11 @@ export function registerOrgLlmProviderRoutes<T extends { Variables: OrgRouteVari
       if (row.source !== "models_dev") return c.json({ error: "provider_refresh_unsupported" }, 409)
       const provider = await getModelsDevProvider(row.providerId ?? "")
       if (!provider) return c.json({ error: "provider_not_found" }, 404)
-      const credential = decodeProviderCredential(row.apiKey)
-      const models = await allCatalogProviderModels(
+      const modelCount = await refreshCatalogProviderModels({
+        providerRow: row,
         provider,
-        credential.apiKey ?? Object.values(credential.apiKeys ?? {})[0],
-      )
-      const now = new Date()
-      await db.transaction(async (tx) => {
-        await tx.delete(LlmProviderModelTable).where(eq(LlmProviderModelTable.llmProviderId, row.id))
-        if (models.length > 0) {
-          await tx.insert(LlmProviderModelTable).values(models.map((model) => ({
-            id: createDenTypeId("llmProviderModel"),
-            llmProviderId: row.id,
-            modelId: model.id,
-            name: model.name,
-            modelConfig: model.config,
-            createdAt: now,
-          })))
-        }
-        await tx.update(LlmProviderTable).set({ updatedAt: now }).where(eq(LlmProviderTable.id, row.id))
       })
-      return c.json({ llmProviderId: row.id, modelCount: models.length })
+      return c.json({ llmProviderId: row.id, modelCount })
     },
   )
 

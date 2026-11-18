@@ -20,6 +20,7 @@ import { startWorkerProvisioningReconcileLoop } from "./workers/reconciler.js"
 import { startGithubSyncWorker } from "./workers/github-sync.js"
 import { externalMcpClientRuntimeName } from "./capability-sources/external-mcp-client-runtime.js"
 import { startAutomationSchedulerLoop } from "./automations/scheduler-loop.js"
+import { startProviderModelRefreshLoop } from "./llm/provider-model-refresh-loop.js"
 import { startModelsAnalyticsExportLoop } from "./models-analytics-export.js"
 import { markServerListening } from "./server-start.js"
 import { startMcpRegistrationProbeLoop } from "./mcp-registration/probe.js"
@@ -43,6 +44,8 @@ const stopMcpRegistrationProbeLoop = startMcpRegistrationProbeLoop()
 const stopAdminMetricsRefreshLoop = startAdminMetricsRefreshLoop()
 const stopConfigBlobWorker = startConfigBlobWorker()
 const automationScheduler = startAutomationSchedulerLoop({ enabled: env.automations.runtimeEnabled })
+// OpenRouter publishes models continuously; keep saved provider lists current.
+const providerModelRefresh = startProviderModelRefreshLoop()
 
 appLogger.info("external mcp implementation selected", { component: "server", runtime: externalMcpClientRuntimeName })
 
@@ -78,6 +81,7 @@ async function stopBackgroundLoops() {
     stopAdminMetricsRefreshLoop(),
     stopConfigBlobWorker(),
     automationScheduler.stop(),
+    providerModelRefresh.stop(),
   ])
 
   for (const result of results) {
